@@ -10,3 +10,4 @@ nltk
 deep-translator
 pydub
 streamlit
+sentencepiece
