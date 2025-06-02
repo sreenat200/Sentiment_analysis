@@ -8,8 +8,24 @@ from transformers import pipeline
 import pandas as pd
 import nltk
 from faster_whisper import WhisperModel
+import os
+import tempfile
 
-nltk.download('punkt')
+# Set the NLTK data directory to a writable location
+nltk_data_dir = os.path.join(os.path.expanduser('~'), 'nltk_data')
+os.makedirs(nltk_data_dir, exist_ok=True)
+
+# Set the cache directory for Hugging Face models to a writable location
+cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface')
+os.makedirs(cache_dir, exist_ok=True)
+os.environ["TRANSFORMERS_CACHE"] = cache_dir
+
+# Set the NLTK data path
+nltk.data.path.append(nltk_data_dir)
+
+# Download the 'punkt' resource
+nltk.download('punkt', download_dir=nltk_data_dir)
+
 
 class MalayalamTranscriptionPipeline:
     def __init__(self, model_size="large-v1"):
