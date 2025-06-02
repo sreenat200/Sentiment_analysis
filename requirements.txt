@@ -1,0 +1,33 @@
+# Streamlit from GitHub (latest dev version)
+git+https://github.com/streamlit/streamlit.git
+
+# Whisper for transcription
+openai-whisper
+
+# Translation
+googletrans==4.0.0rc1  # or use deep-translator
+
+# NLP / Transformers
+transformers
+torch
+sentencepiece
+
+# Language detection & preprocessing
+nltk
+langdetect
+
+# FastText (optional, for more accurate language ID)
+fasttext
+
+# Environment variables support
+python-dotenv
+
+# Audio processing
+pydub
+ffmpeg-python
+
+# Emoji and Unicode handling
+emoji
+
+# For API requests
+requests
