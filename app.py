@@ -1,98 +1,197 @@
-import streamlit as st
 import os
 import tempfile
-from Lead_score_conversion import (
-    MalayalamTranscriptionPipeline,
-    analyze_text,
-    save_analysis_to_csv,
-    compare_analyses,
-    print_analysis_summary
-)
+from datetime import datetime
+import torch
+from pydub import AudioSegment
+from deep_translator import GoogleTranslator
+from transformers import pipeline
+import pandas as pd
+from faster_whisper import WhisperModel
+import nltk
+import streamlit as st
 
-st.set_page_config(page_title="Malayalam Audio Analyzer", layout="wide")
+# Check and install missing packages
+try:
+    import torch
+except ImportError:
+    st.warning("PyTorch not found. Installing...")
+    os.system("pip install torch")
+    import torch
 
-st.title("🎙️ Malayalam Audio Sentiment & Intent Analyzer")
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    st.warning("faster-whisper not found. Installing...")
+    os.system("pip install faster-whisper")
+    from faster_whisper import WhisperModel
 
-uploaded_file = st.file_uploader("Upload Malayalam audio file", type=["mp3", "wav", "aac", "m4a", "flac", "ogg", "wma"])
+# Initialize NLTK data with error handling
+try:
+    nltk_data_path = os.path.join(os.getcwd(), "nltk_data")
+    os.makedirs(nltk_data_path, exist_ok=True)
+    nltk.data.path.append(nltk_data_path)
+    if not nltk.data.find('tokenizers/punkt'):
+        nltk.download('punkt', download_dir=nltk_data_path)
+except Exception as e:
+    st.error(f"Error initializing NLTK: {str(e)}")
 
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp:
-        tmp.write(uploaded_file.read())
-        tmp_path = tmp.name
+class MalayalamTranscriptionPipeline:
+    def __init__(self, model_size="large-v2"):  # Updated to v2 which is more stable
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        st.info(f"Loading Faster-Whisper {model_size} model on {self.device}...")
+        compute_type = "float16" if self.device == "cuda" else "int8"
+        try:
+            self.model = WhisperModel(model_size, device=self.device, compute_type=compute_type)
+        except Exception as e:
+            st.error(f"Failed to load Whisper model: {str(e)}")
+            raise
+        self.temp_files = []
 
-    transcriber = MalayalamTranscriptionPipeline()
-    try:
-        with st.spinner("🔍 Transcribing audio..."):
-            results = transcriber.transcribe_audio(tmp_path)
+    def convert_to_whisper_format(self, input_path):
+        supported_formats = ['.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg']
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+        file_ext = os.path.splitext(input_path)[1].lower()
+        if file_ext not in supported_formats:
+            raise ValueError(f"Unsupported audio format: {file_ext}")
 
-        if not results or not results.get("raw_transcription"):
-            st.error("Transcription failed.")
-        else:
-            raw_text = results["raw_transcription"]
-            st.subheader("📄 English Transcription")
-            st.write(raw_text)
+        temp_dir = os.path.join(tempfile.gettempdir(), "whisper_temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        wav_path = os.path.join(temp_dir, f"temp_{timestamp}.wav")
 
-            with st.spinner("🌐 Translating to Malayalam..."):
-                translated = transcriber.translate_to_malayalam(results)
-                ml_text = translated.get("translated_malayalam", "")
-            st.subheader("🌐 Malayalam Translation")
-            st.write(ml_text)
+        try:
+            audio = AudioSegment.from_file(input_path)
+            audio = audio.set_frame_rate(16000).set_channels(1)
+            audio.export(wav_path, format="wav")
+            self.temp_files.append(wav_path)
+            return wav_path
+        except Exception as e:
+            st.error(f"Audio conversion failed: {str(e)}")
+            return None
 
-            with st.spinner("📊 Running Sentiment & Intent Analysis..."):
-                en_analysis = analyze_text(raw_text, "en")
-                ml_analysis = analyze_text(ml_text, "ml")
-                comparison = compare_analyses(en_analysis, ml_analysis)
+    def transcribe_audio(self, audio_path):
+        if not audio_path.lower().endswith('.wav'):
+            audio_path = self.convert_to_whisper_format(audio_path)
+            if not audio_path:
+                return None
 
-            st.success("✅ Analysis completed.")
+        try:
+            segments, _ = self.model.transcribe(
+                audio_path,
+                beam_size=5,
+                language="ml"  # Changed to Malayalam for better transcription
+            )
 
-            st.subheader("📁 Download Results")
-            en_csv = save_analysis_to_csv(en_analysis, "english")
-            ml_csv = save_analysis_to_csv(ml_analysis, "malayalam")
-            comparison_csv = save_analysis_to_csv(comparison, "comparison")
+            full_text = " ".join(segment.text for segment in segments)
+            return {
+                "raw_transcription": full_text,
+                "audio_metadata": {
+                    "original_path": audio_path,
+                    "sample_rate": 16000,
+                    "duration": len(AudioSegment.from_wav(audio_path)) / 1000
+                }
+            }
+        except Exception as e:
+            st.error(f"Transcription failed: {str(e)}")
+            return None
 
-            for label, path in [("English Analysis", en_csv), ("Malayalam Analysis", ml_csv), ("Comparison", comparison_csv)]:
-                if path and os.path.exists(path):
-                    with open(path, "rb") as f:
-                        st.download_button(
-                            label=f"⬇️ Download {label}",
-                            data=f.read(),
-                            file_name=os.path.basename(path),
-                            mime="text/csv"
-                        )
-
-            # Summaries
-            st.subheader("📈 Summary Insights")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("### 🇬🇧 English Analysis")
-                print_analysis_summary(en_analysis, "English")
-            with col2:
-                st.markdown("### 🇮🇳 Malayalam Analysis")
-                print_analysis_summary(ml_analysis, "Malayalam")
-
-            # Intent match rate and sentiment diff
-            intent_matches = sum(1 for item in comparison if item["intent_match"])
-            intent_match_rate = intent_matches / len(comparison) if comparison else 0
-            sentiment_diff = sum(item["sentiment_diff"] for item in comparison) / len(comparison) if comparison else 0
-            st.markdown(f"### 🔄 Intent Match Rate: `{intent_match_rate:.1%}`")
-            st.markdown(f"### 🎭 Avg Sentiment Score Difference: `{sentiment_diff:.2f}`")
-
-            # Lead Score
-            en_avg = sum(x["sentiment_score"] for x in en_analysis) / len(en_analysis) if en_analysis else 0
-            ml_avg = sum(x["sentiment_score"] for x in ml_analysis) / len(ml_analysis) if ml_analysis else 0
-            lead_score = int(((en_avg + ml_avg) / 2) * 100)
-
-            st.subheader(f"🔥 Lead Score: `{lead_score}/100`")
-            if lead_score >= 70:
-                st.success("💡 High interest lead")
-            elif lead_score >= 40:
-                st.info("🧐 Moderate interest lead")
+    def translate_to_english(self, text_or_dict):
+        try:
+            if isinstance(text_or_dict, dict):
+                text = text_or_dict.get('raw_transcription', '')
             else:
-                st.warning("❄️ Low interest lead")
+                text = text_or_dict
 
+            if not text.strip():
+                return text_or_dict
+
+            return GoogleTranslator(source='ml', target='en').translate(text)
+        except Exception as e:
+            st.warning(f"Translation error: {str(e)}")
+            return text_or_dict
+
+    def cleanup(self):
+        for file_path in self.temp_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except:
+                pass
+        self.temp_files = []
+
+# Initialize sentiment analysis pipeline
+@st.cache_resource
+def load_sentiment_pipeline():
+    try:
+        return pipeline(
+            "sentiment-analysis",
+            model="distilbert-base-uncased-finetuned-sst-2-english",  # Lighter model
+            device=0 if torch.cuda.is_available() else -1
+        )
     except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
-    finally:
-        transcriber.cleanup()
-        os.remove(tmp_path)
+        st.error(f"Failed to load sentiment model: {str(e)}")
+        return None
+
+sentiment_pipeline = load_sentiment_pipeline()
+
+def analyze_sentiment(text):
+    if not sentiment_pipeline:
+        return {"label": "neutral", "score": 0.5}
+    
+    try:
+        result = sentiment_pipeline(text)[0]
+        return {
+            "label": result['label'],
+            "score": result['score']
+        }
+    except:
+        return {"label": "neutral", "score": 0.5}
+
+def display_results():
+    st.set_page_config(
+        page_title="Malayalam Audio Analyzer",
+        page_icon="🎙️",
+        layout="wide"
+    )
+
+    st.title("Malayalam Audio Analyzer")
+    st.write("Upload a Malayalam audio file to analyze sentiment and intent")
+
+    uploaded_file = st.file_uploader(
+        "Choose an audio file",
+        type=["mp3", "wav", "m4a", "ogg"]
+    )
+
+    if uploaded_file:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            audio_path = tmp_file.name
+
+        transcriber = MalayalamTranscriptionPipeline()
+        try:
+            with st.spinner("Processing audio..."):
+                results = transcriber.transcribe_audio(audio_path)
+                if results:
+                    st.subheader("Malayalam Transcription")
+                    st.text_area("Transcription", results['raw_transcription'], height=150)
+
+                    translation = transcriber.translate_to_english(results)
+                    st.subheader("English Translation")
+                    st.text_area("Translation", translation, height=150)
+
+                    sentiment = analyze_sentiment(translation)
+                    st.subheader("Sentiment Analysis")
+                    st.write(f"Sentiment: {sentiment['label']} (confidence: {sentiment['score']:.2f})")
+
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+        finally:
+            transcriber.cleanup()
+            try:
+                os.remove(audio_path)
+            except:
+                pass
+
+if __name__ == "__main__":
+    display_results()
