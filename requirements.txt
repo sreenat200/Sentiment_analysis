@@ -1,9 +1,8 @@
 streamlit
-faster_whisper
+faster-whisper
 googletrans==4.0.0rc1
 transformers
-torch
-sentencepiece
+torch==2.0.1  # Safer version than latest (works better on most platforms)
 nltk
 langdetect
 python-dotenv
