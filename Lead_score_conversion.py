@@ -78,8 +78,6 @@ class MalayalamTranscriptionPipeline:
                 os.remove(wav_path)
             raise
 
-    # ... [rest of the class methods remain the same] ...
-
     def transcribe_audio(self, audio_path):
         try:
             if not audio_path.lower().endswith('.wav'):
