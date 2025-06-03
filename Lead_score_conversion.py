@@ -3,8 +3,8 @@ import zipfile
 import tempfile
 from datetime import datetime
 import torch
-import audioop 
-from pydub import AudioSegment
+from pydub import AudioSegment  # Primary audio processing
+import subprocess  # For ffmpeg fallback
 from deep_translator import GoogleTranslator
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -37,6 +37,7 @@ class MalayalamTranscriptionPipeline:
         supported_formats = ['.mp3', '.wav', '.aac', '.m4a', '.flac', '.ogg', '.wma']
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
+        
         file_ext = os.path.splitext(input_path)[1].lower()
         if file_ext not in supported_formats:
             raise ValueError(f"Unsupported audio format: {file_ext}")
@@ -47,14 +48,24 @@ class MalayalamTranscriptionPipeline:
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             wav_path = os.path.join(temp_dir, f"temp_{timestamp}.wav")
 
-            # Read audio file
-            audio = AudioSegment.from_file(input_path)
-            # Convert to required format
-            audio = audio.set_frame_rate(16000).set_channels(1)
-            # Export to WAV format
-            audio.export(wav_path, format="wav")
-            
-            # Verify file was created
+            # Method 1: Try with pydub first
+            try:
+                audio = AudioSegment.from_file(input_path)
+                audio = audio.set_frame_rate(16000).set_channels(1)
+                audio.export(wav_path, format="wav")
+            except Exception as e:
+                print(f"Pydub conversion failed, trying ffmpeg directly: {str(e)}")
+                # Method 2: Fallback to direct ffmpeg command
+                cmd = [
+                    'ffmpeg',
+                    '-i', input_path,
+                    '-ac', '1',
+                    '-ar', '16000',
+                    '-acodec', 'pcm_s16le',
+                    wav_path
+                ]
+                subprocess.run(cmd, check=True)
+
             if not os.path.exists(wav_path):
                 raise RuntimeError(f"Failed to create temporary WAV file: {wav_path}")
 
@@ -66,6 +77,8 @@ class MalayalamTranscriptionPipeline:
             if 'wav_path' in locals() and os.path.exists(wav_path):
                 os.remove(wav_path)
             raise
+
+    # ... [rest of the class methods remain the same] ...
 
     def transcribe_audio(self, audio_path):
         try:
