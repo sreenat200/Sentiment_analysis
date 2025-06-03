@@ -40,55 +40,72 @@ class MalayalamTranscriptionPipeline:
         if file_ext not in supported_formats:
             raise ValueError(f"Unsupported audio format: {file_ext}")
 
-        temp_dir = os.path.join(tempfile.gettempdir(), "whisper_temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        wav_path = os.path.join(temp_dir, f"temp_{timestamp}.wav")
+        try:
+            temp_dir = os.path.join(tempfile.gettempdir(), "whisper_temp")
+            os.makedirs(temp_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            wav_path = os.path.join(temp_dir, f"temp_{timestamp}.wav")
 
-        audio = AudioSegment.from_file(input_path)
-        audio = audio.set_frame_rate(16000).set_channels(1)
-        audio.export(wav_path, format="wav")
+            # Read audio file
+            audio = AudioSegment.from_file(input_path)
+            # Convert to required format
+            audio = audio.set_frame_rate(16000).set_channels(1)
+            # Export to WAV format
+            audio.export(wav_path, format="wav")
+            
+            # Verify file was created
+            if not os.path.exists(wav_path):
+                raise RuntimeError(f"Failed to create temporary WAV file: {wav_path}")
 
-        self.temp_files.append(wav_path)
-        print(f"Converted to temporary WAV: {wav_path}")
-        return wav_path
+            self.temp_files.append(wav_path)
+            print(f"Converted to temporary WAV: {wav_path}")
+            return wav_path
+        except Exception as e:
+            print(f"Error converting audio file: {str(e)}")
+            if 'wav_path' in locals() and os.path.exists(wav_path):
+                os.remove(wav_path)
+            raise
 
     def transcribe_audio(self, audio_path):
-        if not audio_path.lower().endswith('.wav'):
-            audio_path = self.convert_to_whisper_format(audio_path)
-            if not audio_path:
-                return None
+        try:
+            if not audio_path.lower().endswith('.wav'):
+                audio_path = self.convert_to_whisper_format(audio_path)
+                if not audio_path:
+                    return None
 
-        print("Transcribing audio with Faster-Whisper...")
-        segments, info = self.model.transcribe(
-            audio_path,
-            beam_size=5,
-            language="en"
-        )
+            print("Transcribing audio with Faster-Whisper...")
+            segments, info = self.model.transcribe(
+                audio_path,
+                beam_size=5,
+                language="en"
+            )
 
-        full_text = ""
-        segment_list = []
-        for i, seg in enumerate(segments):
-            text = seg.text.strip()
-            confidence = seg.avg_logprob if hasattr(seg, 'avg_logprob') else 1.0
-            segment_list.append({
-                "start": seg.start,
-                "end": seg.end,
-                "text": text,
-                "confidence": round(confidence, 3),
-                "overlap": i > 0 and seg.start < segment_list[i - 1]["end"]
-            })
-            full_text += f" {text}"
+            full_text = ""
+            segment_list = []
+            for i, seg in enumerate(segments):
+                text = seg.text.strip()
+                confidence = seg.avg_logprob if hasattr(seg, 'avg_logprob') else 1.0
+                segment_list.append({
+                    "start": seg.start,
+                    "end": seg.end,
+                    "text": text,
+                    "confidence": round(confidence, 3),
+                    "overlap": i > 0 and seg.start < segment_list[i - 1]["end"]
+                })
+                full_text += f" {text}"
 
-        return {
-            "raw_transcription": full_text.strip(),
-            "segments": segment_list,
-            "audio_metadata": {
-                "original_path": audio_path,
-                "sample_rate": 16000,
-                "duration": len(AudioSegment.from_wav(audio_path)) / 1000
+            return {
+                "raw_transcription": full_text.strip(),
+                "segments": segment_list,
+                "audio_metadata": {
+                    "original_path": audio_path,
+                    "sample_rate": 16000,
+                    "duration": len(AudioSegment.from_wav(audio_path)) / 1000
+                }
             }
-        }
+        except Exception as e:
+            print(f"Error during transcription: {str(e)}")
+            return None
 
     def translate_to_malayalam(self, text_or_dict):
         try:
@@ -117,6 +134,7 @@ class MalayalamTranscriptionPipeline:
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
+                    print(f"Deleted temp file: {file_path}")
             except Exception as e:
                 print(f"Error deleting temp file {file_path}: {str(e)}")
         self.temp_files = []
@@ -147,7 +165,7 @@ def create_zip_archive(audio_path, raw_transcription, ml_translation, pdf_report
     
     # Calculate intent score (percentage of positive intents)
     positive_intents = sum(1 for item in en_analysis if item["intent"] in ["Strong_interest", "Moderate_interest"])
-    intent_score = int((positive_intents / len(en_analysis)))* 100 if en_analysis else 0
+    intent_score = int((positive_intents / len(en_analysis))) * 100 if en_analysis else 0
     
     # Create base filename
     base_filename = f"{user_filename}_{timestamp}_L{lead_score}_I{intent_score}"
@@ -157,6 +175,7 @@ def create_zip_archive(audio_path, raw_transcription, ml_translation, pdf_report
     audio_ext = os.path.splitext(audio_path)[1]
     new_audio_name = f"{base_filename}{audio_ext}"
     
+    os.makedirs("analysis_results", exist_ok=True)
     with zipfile.ZipFile(zip_filename, 'w') as zipf:
         # Add original audio file (with new name)
         zipf.write(audio_path, arcname=new_audio_name)
@@ -282,7 +301,6 @@ def analyze_sentiment_batch(texts):
         outputs.append(sentiment)
     return outputs
 
-
 def detect_intent(text, language="en"):
     """Enhanced intent detection for internship interest analysis in English and Malayalam"""
     text_lower = text.lower().strip()
@@ -305,7 +323,6 @@ def detect_intent(text, language="en"):
             "No_interest": [
                 "no", "can't", "won't", "don't like",
                 "not now", "later", "not suitable", "decline"
-                
             ],
             "Qualification_query": [
                 "qualification", "education", "degree", "studying", "course",
@@ -346,7 +363,7 @@ def detect_intent(text, language="en"):
             "Strong_interest": [
                 "തയ്യാറാണ്", "ആവശ്യമുണ്ട്", "ചെയ്യാം", "ആഗ്രഹമുണ്ട്", 
                 "ഇഷ്ടമാണ്", "അറിയിച്ചോളൂ", "ബ്രോഷർ വേണം", "വിശദാംശങ്ങൾ വേണം",
-                "ശെയർ ചെയ്യുക", "ഞാൻ വരാം", "ഉത്സാഹം", "താത്പ�്യം",
+                "ശെയർ ചെയ്യുക", "ഞാൻ വരാം", "ഉത്സാഹം", "താത്പര്യം",
                 "സമ്മതം", "അംഗീകരിക്കുന്നു", "ഹാപ്പിയാണ്", "ഞാൻ ചെയ്യാം",
                 "വാട്സാപ്പിൽ അയക്കൂ", "ആവശ്യമാണ്"
             ],
@@ -394,7 +411,7 @@ def detect_intent(text, language="en"):
                  "വാട്സാപ്പ്", "വാട്ട്സാപ്പ്", "കിട്ടി", "അറിയിച്ചു", 
                  "നോട്ടു ചെയ്തു", "സമ്മതം", "അംഗീകരിച്ചു", 
                  "അക്ക്നലഡ്ജ്", "ക്ലിയർ", 
-                 "തയാറാണ്", "അറിയിപ്പ് �ലഭിച്ചു"
+                 "തയാറാണ്", "അറിയിപ്പ് ലഭിച്ചു"
             ]
         }
     }
