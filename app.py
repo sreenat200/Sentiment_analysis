@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from Lead_scor_gdrive import (
+from Lead_score_conversion import (
     analyze_text,
     compare_analyses,
     generate_analysis_pdf,
