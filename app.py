@@ -14,7 +14,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import base64
 from datetime import datetime
-from pydub import AudioSegment
 import zipfile
 
 # Set page config
