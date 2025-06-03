@@ -14,3 +14,4 @@ google-auth-httplib2
 google-auth-oauthlib
 streamlit
 huggingface_hub[hf_xet]
+pyaudio
