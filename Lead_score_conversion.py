@@ -266,29 +266,18 @@ def analyze_sentiment_batch(texts):
     outputs = []
     for result in results:
         label = result['label']
-        score = result['score']
         
-        # Map the model's output to our standardized sentiment labels
+        # Set default scores based on sentiment labels
         if "1 star" in label or "2 stars" in label:
-            sentiment = {"label": "negative", "score": score}
+            sentiment = {"label": "negative", "score": 0.2}  # Default for negative
         elif "3 stars" in label:
-            sentiment = {"label": "neutral", "score": score}
+            sentiment = {"label": "neutral", "score": 0.5}   # Default for neutral
         elif "4 stars" in label:
-            sentiment = {"label": "positive", "score": score}
+            sentiment = {"label": "positive", "score": 0.7}  # Default for positive
         elif "5 stars" in label:
-            sentiment = {"label": "very positive", "score": score}
+            sentiment = {"label": "very positive", "score": 0.9}  # Default for very positive
         else:
-            sentiment = {"label": "neutral", "score": score}
-            
-        # Adjust scores to match our scale (0.1-0.9)
-        if sentiment["label"] == "negative":
-            sentiment["score"] = max(0.1, min(0.3, score))  # Cap between 0.1-0.3
-        elif sentiment["label"] == "neutral":
-            sentiment["score"] = max(0.4, min(0.6, score))  # Cap between 0.4-0.6
-        elif sentiment["label"] == "positive":
-            sentiment["score"] = max(0.7, min(0.8, score))  # Cap between 0.7-0.8
-        elif sentiment["label"] == "very positive":
-            sentiment["score"] = max(0.9, min(1.0, score))  # Cap between 0.9-1.0
+            sentiment = {"label": "neutral", "score": 0.5}   # Default fallback
             
         outputs.append(sentiment)
     return outputs
@@ -439,22 +428,22 @@ def analyze_text(text, language="en"):
     if not sentences:
         return []
 
-    # First get sentiment analysis results
+    # Get sentiment analysis results with default scores
     sentiment_results = analyze_sentiment_batch(sentences)
     
-    # Then get intent analysis which also provides sentiment
+    # Get intent analysis which provides both intent and sentiment
     intent_results = [detect_intent(sentence, language) for sentence in sentences]
 
     analysis = []
     for i, sentence in enumerate(sentences):
-        # Use intent-based sentiment label but keep the calculated score
+        # Use the intent-based sentiment label and score
         analysis.append({
             "sentence_id": f"{language}_{i+1}",
             "text": sentence,
             "language": language,
             "intent": intent_results[i]["intent"],
             "sentiment": intent_results[i]["sentiment"],
-            "sentiment_score": sentiment_results[i]["score"],  # Keep the calculated score
+            "sentiment_score": intent_results[i]["sentiment_score"],  # Use intent-based score
             "word_count": len(sentence.split()),
             "char_count": len(sentence)
         })
