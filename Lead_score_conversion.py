@@ -3,6 +3,7 @@ import zipfile
 import tempfile
 from datetime import datetime
 import torch
+import audioop 
 from pydub import AudioSegment
 from deep_translator import GoogleTranslator
 from google.oauth2 import service_account
