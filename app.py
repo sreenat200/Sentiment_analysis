@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from Lead_score_conversion import (
+from Lead_scor_gdrive import (
     analyze_text,
     compare_analyses,
     generate_analysis_pdf,
@@ -308,13 +308,7 @@ def main():
             with col1:
                 display_lead_score(results['lead_score'])
             
-            with col2:
-                st.markdown(f"""
-                <div class="score-card">
-                    <div class="lead-score">{results['intent_score']}/100</div>
-                    <div style="text-align: center; font-size: 1.2rem;">Intent Score</div>
-                </div>
-                """, unsafe_allow_html=True)
+            
             
             # Analysis dataframes
             st.subheader("English Analysis")
