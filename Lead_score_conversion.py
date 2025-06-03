@@ -1,34 +1,31 @@
 import os
+import zipfile
 import tempfile
 from datetime import datetime
 import torch
 from pydub import AudioSegment
 from deep_translator import GoogleTranslator
-from transformers import pipeline
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 import pandas as pd
 import nltk
 from faster_whisper import WhisperModel
-import os
-import tempfile
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+import seaborn as sns
+import numpy as np
+from io import BytesIO
+from transformers import pipeline
 
-# Set the NLTK data directory to a writable location
-nltk_data_dir = os.path.join(os.path.expanduser('~'), 'nltk_data')
-os.makedirs(nltk_data_dir, exist_ok=True)
+nltk.download('punkt')
 
-# Set the cache directory for Hugging Face models to a writable location
-cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface')
-os.makedirs(cache_dir, exist_ok=True)
-os.environ["TRANSFORMERS_CACHE"] = cache_dir
-
-# Set the NLTK data path
-nltk.data.path.append(nltk_data_dir)
-
-# Download the 'punkt' resource
-nltk.download('punkt', download_dir=nltk_data_dir)
-
+# Google Drive API setup
+SCOPES = ['https://www.googleapis.com/auth/drive']
+SERVICE_ACCOUNT_FILE = 'service_account.json'  # Replace with your service account file
 
 class MalayalamTranscriptionPipeline:
-    def __init__(self, model_size="large-v1"):
+    def __init__(self, model_size="large-v2"):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading Faster-Whisper {model_size} model on {self.device}...")
         compute_type = "float16" if self.device == "cuda" else "int8"
@@ -131,6 +128,131 @@ sentiment_pipeline = pipeline(
     device=0 if torch.cuda.is_available() else -1
 )
 
+def authenticate_gdrive():
+    """Authenticate with Google Drive using service account"""
+    creds = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    return build('drive', 'v3', credentials=creds)
+
+def create_zip_archive(audio_path, raw_transcription, ml_translation, pdf_report, 
+                      en_analysis, ml_analysis, user_filename):
+    """Create a zip archive with all analysis files"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Calculate scores
+    en_avg_score = sum(item["sentiment_score"] for item in en_analysis) / len(en_analysis) if en_analysis else 0
+    ml_avg_score = sum(item["sentiment_score"] for item in ml_analysis) / len(ml_analysis) if ml_analysis else 0
+    combined_avg = (en_avg_score + ml_avg_score) / 2
+    lead_score = int(combined_avg * 100)
+    
+    # Calculate intent score (percentage of positive intents)
+    positive_intents = sum(1 for item in en_analysis if item["intent"] in ["Strong_interest", "Moderate_interest"])
+    intent_score = int((positive_intents / len(en_analysis)))* 100 if en_analysis else 0
+    
+    # Create base filename
+    base_filename = f"{user_filename}_{timestamp}_L{lead_score}_I{intent_score}"
+    zip_filename = f"analysis_results/{base_filename}.zip"
+    
+    # Rename audio file with scores
+    audio_ext = os.path.splitext(audio_path)[1]
+    new_audio_name = f"{base_filename}{audio_ext}"
+    
+    with zipfile.ZipFile(zip_filename, 'w') as zipf:
+        # Add original audio file (with new name)
+        zipf.write(audio_path, arcname=new_audio_name)
+        
+        # Add text files
+        zipf.writestr(f"{base_filename}_transcription.txt", raw_transcription)
+        zipf.writestr(f"{base_filename}_translation.txt", ml_translation)
+        
+        # Add PDF report
+        zipf.write(pdf_report, arcname=f"{base_filename}_report.pdf")
+        
+        # Add CSV analysis files
+        en_csv = save_analysis_to_csv(en_analysis, "english")
+        ml_csv = save_analysis_to_csv(ml_analysis, "malayalam")
+        comparison = compare_analyses(en_analysis, ml_analysis)
+        comparison_csv = save_analysis_to_csv(comparison, "comparison")
+        
+        if en_csv:
+            zipf.write(en_csv, arcname=f"{base_filename}_english_analysis.csv")
+        if ml_csv:
+            zipf.write(ml_csv, arcname=f"{base_filename}_malayalam_analysis.csv")
+        if comparison_csv:
+            zipf.write(comparison_csv, arcname=f"{base_filename}_comparison.csv")
+    
+    print(f"✅ Created zip archive: {zip_filename}")
+    return zip_filename, base_filename
+
+def upload_to_gdrive(file_path, folder_id=None):
+    """Upload file to Google Drive"""
+    try:
+        service = authenticate_gdrive()
+        
+        file_metadata = {
+            'name': os.path.basename(file_path),
+            'parents': [folder_id] if folder_id else []
+        }
+        
+        media = MediaFileUpload(file_path, resumable=True)
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, name, webViewLink'
+        ).execute()
+        
+        print(f"✅ Uploaded to Google Drive: {file.get('name')}")
+        print(f"🔗 View file at: {file.get('webViewLink')}")
+        return file
+    except Exception as e:
+        print(f"❌ Google Drive upload failed: {str(e)}")
+        return None
+
+def search_gdrive_files(query=None, min_lead=None, max_lead=None, 
+                       min_intent=None, max_intent=None):
+    """Search files in Google Drive with filters"""
+    try:
+        service = authenticate_gdrive()
+        query_parts = []
+        
+        if query:
+            query_parts.append(f"name contains '{query}'")
+        
+        # Add score filters if provided
+        if min_lead is not None:
+            query_parts.append(f"name contains '_L{min_lead}' or name contains '_L{min_lead+1}'")
+        if max_lead is not None:
+            query_parts.append(f"name contains '_L{max_lead}' or name contains '_L{max_lead-1}'")
+        if min_intent is not None:
+            query_parts.append(f"name contains '_I{min_intent}' or name contains '_I{min_intent+1}'")
+        if max_intent is not None:
+            query_parts.append(f"name contains '_I{max_intent}' or name contains '_I{max_intent-1}'")
+        
+        full_query = " and ".join(query_parts) if query_parts else ""
+        
+        results = service.files().list(
+            q=full_query,
+            pageSize=10,
+            fields="nextPageToken, files(id, name, webViewLink, createdTime)"
+        ).execute()
+        
+        items = results.get('files', [])
+        
+        if not items:
+            print("No files found matching your criteria.")
+            return []
+        
+        print(f"Found {len(items)} files:")
+        for item in items:
+            print(f"\n📄 {item['name']}")
+            print(f"🕒 Created: {item['createdTime']}")
+            print(f"🔗 View: {item['webViewLink']}")
+        
+        return items
+    except Exception as e:
+        print(f"❌ Google Drive search failed: {str(e)}")
+        return []
+
 def split_into_sentences(text):
     try:
         sentences = nltk.sent_tokenize(text)
@@ -144,20 +266,33 @@ def analyze_sentiment_batch(texts):
     outputs = []
     for result in results:
         label = result['label']
-        if "1 star" in label:
-            sentiment = {"label": "very negative", "score": 0.1}
-        elif "2 stars" in label:
-            sentiment = {"label": "negative", "score": 0.3}
+        score = result['score']
+        
+        # Map the model's output to our standardized sentiment labels
+        if "1 star" in label or "2 stars" in label:
+            sentiment = {"label": "negative", "score": score}
         elif "3 stars" in label:
-            sentiment = {"label": "neutral", "score": 0.5}
+            sentiment = {"label": "neutral", "score": score}
         elif "4 stars" in label:
-            sentiment = {"label": "positive", "score": 0.7}
+            sentiment = {"label": "positive", "score": score}
         elif "5 stars" in label:
-            sentiment = {"label": "very positive", "score": 0.9}
+            sentiment = {"label": "very positive", "score": score}
         else:
-            sentiment = {"label": "neutral", "score": 0.5}
+            sentiment = {"label": "neutral", "score": score}
+            
+        # Adjust scores to match our scale (0.1-0.9)
+        if sentiment["label"] == "negative":
+            sentiment["score"] = max(0.1, min(0.3, score))  # Cap between 0.1-0.3
+        elif sentiment["label"] == "neutral":
+            sentiment["score"] = max(0.4, min(0.6, score))  # Cap between 0.4-0.6
+        elif sentiment["label"] == "positive":
+            sentiment["score"] = max(0.7, min(0.8, score))  # Cap between 0.7-0.8
+        elif sentiment["label"] == "very positive":
+            sentiment["score"] = max(0.9, min(1.0, score))  # Cap between 0.9-1.0
+            
         outputs.append(sentiment)
     return outputs
+
 
 def detect_intent(text, language="en"):
     """Enhanced intent detection for internship interest analysis in English and Malayalam"""
@@ -165,13 +300,12 @@ def detect_intent(text, language="en"):
     
     intent_keywords = {
         "en": {
-            # Interest Levels
             "Strong_interest": [
                 "yes", "definitely", "ready", "want to join", "interested", 
                 "share details", "send brochure", "i'll join", "let's proceed",
-                "where do i sign", "how to apply", "when can i start", "accept",
+                "where do i sign", "share", "when can i start", "accept",
                 "looking forward", "excited", "happy to", "glad to", "eager",
-                "share it", "i will come", "i'm in"
+                "share it", "whatsapp", "i'm in"
             ],
             "Moderate_interest": [
                 "maybe", "consider", "think about", "let me think", "tell me more",
@@ -180,12 +314,10 @@ def detect_intent(text, language="en"):
                 "get back", "discuss", "consult", "review", "evaluate"
             ],
             "No_interest": [
-                "no", "not interested", "can't", "won't", "don't like",
-                "not now", "later", "not suitable", "inconvenient", "decline",
-                "pass", "refuse", "reject", "not for me", "not my field"
+                "no", "can't", "won't", "don't like",
+                "not now", "later", "not suitable", "decline"
+                
             ],
-
-            # Conversation Categories
             "Qualification_query": [
                 "qualification", "education", "degree", "studying", "course",
                 "background", "academics", "university", "college", "bsc",
@@ -217,19 +349,17 @@ def detect_intent(text, language="en"):
                 "build", "create", "implement", "hands-on", "practical"
             ],
             "Confirmation": [
-                "ok", "looking for", "interested", "send whatsapp", "got it",
-                "acknowledge", "noted", "please send", "sent details", "agreed"
+                 "ok", "looking for", "interested", "send whatsapp", "got it",
+                 "acknowledge", "noted", "please send", "sent details", "agreed"
             ]
         },
-
         "ml": {
-            # Interest Levels
             "Strong_interest": [
                 "തയ്യാറാണ്", "ആവശ്യമുണ്ട്", "ചെയ്യാം", "ആഗ്രഹമുണ്ട്", 
                 "ഇഷ്ടമാണ്", "അറിയിച്ചോളൂ", "ബ്രോഷർ വേണം", "വിശദാംശങ്ങൾ വേണം",
-                "ശെയർ ചെയ്യുക", "ഞാൻ വരാം", "ഉത്സാഹം", "താത്പര്യം",
+                "ശെയർ ചെയ്യുക", "ഞാൻ വരാം", "ഉത്സാഹം", "താത്പ�്യം",
                 "സമ്മതം", "അംഗീകരിക്കുന്നു", "ഹാപ്പിയാണ്", "ഞാൻ ചെയ്യാം",
-                "നിശ്ചിതമായി", "ആവശ്യമാണ്"
+                "വാട്സാപ്പിൽ അയക്കൂ", "ആവശ്യമാണ്"
             ],
             "Moderate_interest": [
                 "ആലോചിക്കാം", "നോക്കാം", "താല്പര്യമുണ്ട്", "ഇന്റെറസ്റ്റഡ്",
@@ -237,11 +367,8 @@ def detect_intent(text, language="en"):
                 "കൂടുതൽ വിവരങ്ങൾ", "വ്യാഖ്യാനിക്കുക", "അവലംബിക്കുക"
             ],
             "No_interest": [
-                "ഇല്ല", "വേണ്ട", "സാധ്യമല്ല", "ഇഷ്ടമല്ല", "ഇങ്ങനെയല്ല",
-                "നിരസിക്കുക", "അനാവശ്യമാണ്", "പിന്തിരിയുക", "ഇതല്ല", "നിഷേധം"
+                "ഇല്ല", "വേണ്ട", "സാധ്യമല്ല", "ഇഷ്ടമല്ല"
             ],
-
-            # Conversation Categories
             "Qualification_query": [
                 "വിദ്യാഭ്യാസം", "ഡിഗ്രി", "ബിസി", "പഠിക്കുന്നു", 
                 "പഠനം", "അധ്യയനം", "ക്ലാസ്", "വർഷം", 
@@ -276,50 +403,58 @@ def detect_intent(text, language="en"):
             "Confirmation": [
                  "ശരി", "താല്പര്യമുണ്ട്", "ഇഷ്ടമുണ്ട്", "വാട്സാപ്പിൽ അയക്കൂ", 
                  "വാട്സാപ്പ്", "വാട്ട്സാപ്പ്", "കിട്ടി", "അറിയിച്ചു", 
-                 "നോട്ടു ചെയ്തു", "സമ്മതം", "ബോധിച്ചിട്ടുണ്ട്", 
-                 "അംഗീകരിച്ചു", "അക്ക്നലഡ്ജ്", "ക്ലിയർ", 
-                 "തയാറാണ്", "അറിയിപ്പ് ലഭിച്ചു"
+                 "നോട്ടു ചെയ്തു", "സമ്മതം", "അംഗീകരിച്ചു", 
+                 "അക്ക്നലഡ്ജ്", "ക്ലിയർ", 
+                 "തയാറാണ്", "അറിയിപ്പ് �ലഭിച്ചു"
             ]
-
         }
     }
 
-    # Step 1: Detect interest level
+    if any(keyword in text_lower for keyword in intent_keywords[language]["Confirmation"]):
+        return {"intent": "Confirmation", "sentiment": "very positive", "sentiment_score": 0.9}
+    
+    # Then check for strong interest
     if any(keyword in text_lower for keyword in intent_keywords[language]["Strong_interest"]):
-        return "Strong_interest"
-    if any(keyword in text_lower for keyword in intent_keywords[language]["Moderate_interest"]):
-        return "Moderate_interest"
+        return {"intent": "Strong_interest", "sentiment": "positive", "sentiment_score": 0.7}
+    
+    # Then check for no interest
     if any(keyword in text_lower for keyword in intent_keywords[language]["No_interest"]):
-        return "No_interest"
-
-    # Step 2: Detect conversation category
+        return {"intent": "No_interest", "sentiment": "negative", "sentiment_score": 0.2}
+    
+    # Then check for moderate interest
+    if any(keyword in text_lower for keyword in intent_keywords[language]["Moderate_interest"]):
+        return {"intent": "Moderate_interest", "sentiment": "neutral", "sentiment_score": 0.5}
+    
+    # Check other intents
     for intent, keywords in intent_keywords[language].items():
-        if intent not in ["Strong_interest", "Moderate_interest", "No_interest"]:
+        if intent not in ["Confirmation", "Strong_interest", "No_interest", "Moderate_interest"]:
             if any(keyword in text_lower for keyword in keywords):
-                return intent
-
-    return "Neutral_response"
-
-
+                return {"intent": intent, "sentiment": "neutral", "sentiment_score": 0.5}
+    
+    # Default response
+    return {"intent": "Neutral_response", "sentiment": "neutral", "sentiment_score": 0.5}
 
 def analyze_text(text, language="en"):
     sentences = split_into_sentences(text)
     if not sentences:
         return []
 
+    # First get sentiment analysis results
     sentiment_results = analyze_sentiment_batch(sentences)
+    
+    # Then get intent analysis which also provides sentiment
+    intent_results = [detect_intent(sentence, language) for sentence in sentences]
 
     analysis = []
     for i, sentence in enumerate(sentences):
-        sentiment = sentiment_results[i]
-        intent = detect_intent(sentence, language)
+        # Use intent-based sentiment label but keep the calculated score
         analysis.append({
             "sentence_id": f"{language}_{i+1}",
             "text": sentence,
             "language": language,
-            "intent": intent,
-            "sentiment": sentiment["label"],
-            "sentiment_score": sentiment["score"],
+            "intent": intent_results[i]["intent"],
+            "sentiment": intent_results[i]["sentiment"],
+            "sentiment_score": sentiment_results[i]["score"],  # Keep the calculated score
             "word_count": len(sentence.split()),
             "char_count": len(sentence)
         })
@@ -338,6 +473,108 @@ def save_analysis_to_csv(analysis, filename_prefix):
     df.to_csv(full_path, index=False, encoding='utf-8-sig')
     print(f"✅ Analysis saved to {full_path}")
     return full_path
+
+def generate_analysis_pdf(en_analysis, ml_analysis, comparison, filename_prefix):
+    """Generate a PDF report with analysis metrics and visualizations"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    pdf_filename = f"analysis_results/{filename_prefix}_report_{timestamp}.pdf"
+    os.makedirs("analysis_results", exist_ok=True)
+    
+    # Calculate metrics
+    en_avg_score = sum(item["sentiment_score"] for item in en_analysis) / len(en_analysis) if en_analysis else 0
+    ml_avg_score = sum(item["sentiment_score"] for item in ml_analysis) / len(ml_analysis) if ml_analysis else 0
+    combined_avg = (en_avg_score + ml_avg_score) / 2
+    lead_score = int(combined_avg * 100)
+    
+    # Prepare data for visualizations
+    en_sentiments = [item["sentiment"] for item in en_analysis]
+    ml_sentiments = [item["sentiment"] for item in ml_analysis]
+    en_scores = [item["sentiment_score"] for item in en_analysis]
+    ml_scores = [item["sentiment_score"] for item in ml_analysis]
+    sentence_numbers = list(range(1, len(en_analysis)+1))
+    
+    with PdfPages(pdf_filename) as pdf:
+        plt.figure(figsize=(10, 6))
+        
+        # Title page
+        plt.text(0.5, 0.8, "Conversation Analysis Report", ha='center', va='center', size=20)
+        plt.text(0.5, 0.7, f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 
+                ha='center', va='center', size=12)
+        plt.text(0.5, 0.6, f"Filename: {filename_prefix}", ha='center', va='center', size=12)
+        plt.axis('off')
+        pdf.savefig()
+        plt.close()
+        
+        # Key Metrics
+        plt.figure(figsize=(10, 6))
+        plt.text(0.1, 0.9, "Key Metrics", size=16)
+        plt.text(0.1, 0.8, f"English Avg Sentiment: {en_avg_score:.2f}", size=12)
+        plt.text(0.1, 0.7, f"Malayalam Avg Sentiment: {ml_avg_score:.2f}", size=12)
+        plt.text(0.1, 0.6, f"Combined Avg Sentiment: {combined_avg:.2f}", size=12)
+        plt.text(0.1, 0.5, f"Calculated Lead Score: {lead_score}/100", size=12)
+        
+        # Interpretation
+        interpretation = ""
+        if lead_score >= 70:
+            interpretation = "High interest lead"
+        elif lead_score >= 40:
+            interpretation = "Moderate interest lead"
+        else:
+            interpretation = "Low interest lead"
+        plt.text(0.1, 0.4, f"Interpretation: {interpretation}", size=12)
+        plt.axis('off')
+        pdf.savefig()
+        plt.close()
+        
+        # Sentiment distribution comparison
+        plt.figure(figsize=(10, 6))
+        plt.subplot(1, 2, 1)
+        pd.Series(en_sentiments).value_counts().plot(kind='bar', color='skyblue')
+        plt.title('English Sentiment Distribution')
+        plt.xticks(rotation=45)
+        
+        plt.subplot(1, 2, 2)
+        pd.Series(ml_sentiments).value_counts().plot(kind='bar', color='lightgreen')
+        plt.title('Malayalam Sentiment Distribution')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+        
+        # Sentiment trend over time
+        plt.figure(figsize=(10, 6))
+        plt.plot(sentence_numbers, en_scores, marker='o', label='English', color='blue')
+        plt.plot(sentence_numbers, ml_scores, marker='s', label='Malayalam', color='green')
+        plt.xlabel('Sentence Number')
+        plt.ylabel('Sentiment Score')
+        plt.title('Sentiment Trend Over Conversation')
+        plt.legend()
+        plt.grid(True)
+        pdf.savefig()
+        plt.close()
+        
+        # Intent distribution
+        plt.figure(figsize=(10, 6))
+        en_intents = [item["intent"] for item in en_analysis]
+        pd.Series(en_intents).value_counts().plot(kind='bar', color='orange')
+        plt.title('Intent Distribution')
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        pdf.savefig()
+        plt.close()
+        
+        # Sentiment difference histogram
+        plt.figure(figsize=(10, 6))
+        sentiment_diffs = [abs(en - ml) for en, ml in zip(en_scores, ml_scores)]
+        plt.hist(sentiment_diffs, bins=10, color='purple', alpha=0.7)
+        plt.xlabel('Sentiment Score Difference')
+        plt.ylabel('Frequency')
+        plt.title('English-Malayalam Sentiment Differences')
+        pdf.savefig()
+        plt.close()
+    
+    print(f"✅ PDF report generated: {pdf_filename}")
+    return pdf_filename
 
 def compare_analyses(en_analysis, ml_analysis):
     comparison = []
@@ -371,7 +608,8 @@ def print_analysis_summary(analysis, title):
     avg_score = sum(item["sentiment_score"] for item in analysis) / len(analysis)
     print(f"\nAverage Sentiment Score: {avg_score:.2f}")
 
-if __name__ == "__main__":
+def main_analysis_workflow():
+    """Main workflow that integrates with the original analysis code"""
     transcriber = MalayalamTranscriptionPipeline()
 
     try:
@@ -400,38 +638,93 @@ if __name__ == "__main__":
         en_analysis = analyze_text(raw_transcription, "en")
         ml_analysis = analyze_text(ml_translation, "ml")
 
-        en_csv = save_analysis_to_csv(en_analysis, "english")
-        ml_csv = save_analysis_to_csv(ml_analysis, "malayalam")
+        # Generate PDF report
+        user_filename = input("\nEnter a base name for your files (without extension): ").strip()
+        if not user_filename:
+            user_filename = "conversation_analysis"
+        
+        pdf_report = generate_analysis_pdf(en_analysis, ml_analysis, 
+                                         compare_analyses(en_analysis, ml_analysis), 
+                                         user_filename)
 
-        comparison = compare_analyses(en_analysis, ml_analysis)
-        comparison_csv = save_analysis_to_csv(comparison, "comparison")
+        # Create zip archive
+        zip_filename, base_filename = create_zip_archive(
+            audio_path, raw_transcription, ml_translation, pdf_report,
+            en_analysis, ml_analysis, user_filename
+        )
 
+        # Upload to Google Drive
+        drive_folder_id = input("Enter Google Drive folder ID (leave empty for root): ").strip()
+        if drive_folder_id:
+            upload_to_gdrive(zip_filename, drive_folder_id)
+        else:
+            upload_to_gdrive(zip_filename)
+
+        print("\n=== Analysis Complete ===")
         print_analysis_summary(en_analysis, "English")
         print_analysis_summary(ml_analysis, "Malayalam")
-
-        print("\n=== Translation Accuracy Insights ===")
-        intent_matches = sum(1 for item in comparison if item["intent_match"])
-        print(f"Intent Match Rate: {intent_matches / len(comparison):.1%}")
-        avg_sentiment_diff = sum(item["sentiment_diff"] for item in comparison) / len(comparison)
-        print(f"Average Sentiment Difference: {avg_sentiment_diff:.2f}")
-
-        # Calculate Lead Score from average sentiment scores
-        en_avg_score = sum(item["sentiment_score"] for item in en_analysis) / len(en_analysis) if en_analysis else 0
-        ml_avg_score = sum(item["sentiment_score"] for item in ml_analysis) / len(ml_analysis) if ml_analysis else 0
-        combined_avg = (en_avg_score + ml_avg_score) / 2
-        
-        # Convert to lead score (0-100 scale)
-        lead_score = int(combined_avg * 100)
-        print(f"\n=== Lead Score ===")
-        print(f"Calculated Lead Score: {lead_score}/100")
-        if lead_score >= 70:
-            print("Interpretation: High interest lead")
-        elif lead_score >= 40:
-            print("Interpretation: Moderate interest lead")
-        else:
-            print("Interpretation: Low interest lead")
 
     except Exception as e:
         print(f"\n❌ An error occurred: {str(e)}")
     finally:
         transcriber.cleanup()
+
+def search_menu():
+    """Interactive search menu"""
+    while True:
+        print("\n=== Google Drive Search ===")
+        print("1. Search by filename")
+        print("2. Filter by lead score range")
+        print("3. Filter by intent score range")
+        print("4. Combined search")
+        print("5. Back to main menu")
+        
+        choice = input("Enter your choice: ").strip()
+        
+        if choice == "1":
+            query = input("Enter search term: ").strip()
+            search_gdrive_files(query=query)
+        elif choice == "2":
+            min_lead = int(input("Minimum lead score (0-100): "))
+            max_lead = int(input("Maximum lead score (0-100): "))
+            search_gdrive_files(min_lead=min_lead, max_lead=max_lead)
+        elif choice == "3":
+            min_intent = int(input("Minimum intent score (0-100): "))
+            max_intent = int(input("Maximum intent score (0-100): "))
+            search_gdrive_files(min_intent=min_intent, max_intent=max_intent)
+        elif choice == "4":
+            query = input("Enter search term (leave empty to skip): ").strip() or None
+            min_lead = int(input("Minimum lead score (0-100, leave empty to skip): ") or 0)
+            max_lead = int(input("Maximum lead score (0-100, leave empty to skip): ") or 100)
+            min_intent = int(input("Minimum intent score (0-100, leave empty to skip): ") or 0)
+            max_intent = int(input("Maximum intent score (0-100, leave empty to skip): ") or 100)
+            search_gdrive_files(
+                query=query,
+                min_lead=min_lead,
+                max_lead=max_lead,
+                min_intent=min_intent,
+                max_intent=max_intent
+            )
+        elif choice == "5":
+            break
+        else:
+            print("Invalid choice, please try again.")
+
+if __name__ == "__main__":
+    while True:
+        print("\n=== Main Menu ===")
+        print("1. Analyze new audio file")
+        print("2. Search existing analyses")
+        print("3. Exit")
+        
+        choice = input("Enter your choice: ").strip()
+        
+        if choice == "1":
+            main_analysis_workflow()
+        elif choice == "2":
+            search_menu()
+        elif choice == "3":
+            print("Goodbye!")
+            break
+        else:
+            print("Invalid choice, please try again.")
