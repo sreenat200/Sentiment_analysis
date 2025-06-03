@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+from pydub import AudioSegment
 from Lead_score_conversion import (
     analyze_text,
     compare_analyses,
