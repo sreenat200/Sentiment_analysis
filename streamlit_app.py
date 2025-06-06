@@ -284,7 +284,7 @@ def process_audio_file(audio_file, model_size):
         progress_bar.progress(30)
         
         # Step 3: Initialize Whisper model
-        status_text.text("Step 3/7: Loading Whisper model (this may take a minute)...")
+        status_text.text("Step 3/7: Loading model (this may take a minute)...")
         if st.session_state.whisper_model is None:
             import torch
             from faster_whisper import WhisperModel
@@ -435,16 +435,21 @@ def display_results():
         fig, ax = plt.subplots(figsize=(10, 5))
         en_scores = [item["sentiment_score"] for item in results["en_analysis"]]
         ml_scores = [item["sentiment_score"] for item in results["ml_analysis"]]
-        sentence_numbers = list(range(1, len(en_scores)+1))
         
-        ax.plot(sentence_numbers, en_scores, marker='o', label='English', color='blue')
-        ax.plot(sentence_numbers, ml_scores, marker='s', label='Malayalam', color='green')
-        ax.set_xlabel('Sentence Number')
-        ax.set_ylabel('Sentiment Score')
-        ax.set_title('Sentiment Trend Over Conversation')
-        ax.legend()
-        ax.grid(True)
-        st.pyplot(fig)
+        # Ensure consistent lengths by taking the minimum
+        min_length = min(len(en_scores), len(ml_scores))
+        if min_length > 0:
+            sentence_numbers = list(range(1, min_length + 1))
+            ax.plot(sentence_numbers, en_scores[:min_length], marker='o', label='English', color='blue')
+            ax.plot(sentence_numbers, ml_scores[:min_length], marker='s', label='Malayalam', color='green')
+            ax.set_xlabel('Sentence Number')
+            ax.set_ylabel('Sentiment Score')
+            ax.set_title('Sentiment Trend Over Conversation')
+            ax.legend()
+            ax.grid(True)
+            st.pyplot(fig)
+        else:
+            st.warning("No sentiment scores available to plot trend.")
     
     # Export Results section at the bottom
     st.markdown("---")
@@ -564,10 +569,10 @@ def main():
     # Initialize session state first
     initialize_session_state()
     
-    st.title("📊 Malayalam Audio Lead Scoring System")
+    st.title("Malayalam Audio Lead Scoring System 📊")
     
     # Search functionality at the top with filter on the right
-    st.markdown('<div class="search-header"><h2>🔍 Search Google Drive</h2></div>', unsafe_allow_html=True)
+    st.markdown('<div class="search-header"><h2>Search recent analysis files </h2></div>', unsafe_allow_html=True)
     
     # Create columns for search and filter
     col1, col2 = st.columns([3, 1])
@@ -601,8 +606,8 @@ def main():
                     display_search_results(files)
     
     st.markdown("""
-    Upload an audio file to get English transcription, Malayalam translation, sentiment analysis, 
-    and lead scoring with Google Drive integration.
+    Upload an audio file to get transcriptions, sentiment analysis, 
+    and lead scoring.
     """)
 
     # Sidebar for file upload and settings
@@ -627,9 +632,9 @@ def main():
         st.markdown("---")
         st.header("Analysis Settings")
         model_size = st.selectbox(
-            "Select Whisper Model Size",
-            ["base","small", "medium", "large","large-v1", "large-v2", "large-v3"],
-            index=1  # Default to large-v2
+            "Select Model Size",
+            ["base", "small", "medium", "large", "large-v1", "large-v2", "large-v3"],
+            index=1  # Default to small
         )
         
         st.markdown("---")

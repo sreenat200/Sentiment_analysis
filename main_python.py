@@ -25,7 +25,7 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'service_account.json'
 
 class MalayalamTranscriptionPipeline:
-    def __init__(self, model_size="large-v2"):
+    def __init__(self, model_size=""):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Loading Faster-Whisper {model_size} model on {self.device}...")
         compute_type = "float16" if self.device == "cuda" else "int8"
@@ -398,7 +398,7 @@ def detect_intent(text, language="en"):
             "Internship_details": [
                 "internship", "program", "duration", "months", "period",
                 "schedule", "timing", "timeframe", "1 to 3", "three months",
-                "structure", "plan", "framework", "looking for an internship in data science"
+                "structure", "plan","placement", "framework", "looking for an internship in data science"
             ],
             "Location_query": [
                 "online", "offline", "location", "place", "where",
@@ -450,14 +450,14 @@ def detect_intent(text, language="en"):
                 "കോഴ്‌സ്", "സിലബസ്", "വിദ്യാർഥി", "ഗണിതം", "സയൻസ്"
             ],
             "Internship_details": [
-                "ഇന്റെണ്ഷിപ്", "പരിശീലനം",  
+                "ഇന്റെണ്ഷിപ്", "പരിശീലനം", "പ്ലെയ്സ്മെന്റ്", 
                 "മാസം", "സമയക്രമം", "ടൈമിംഗ്", "1 മുതൽ 3 വരെ", 
                 "അവസാന വർഷം", "ലൈവ്", "ഫ്രെയിംവർക്ക്", "സ്ഥിരമായി","ഡാറ്റാ സയൻസിലെ"," ഇന്റേൺഷിപ്പ് "
             ],
             "Location_query": [
                 "ഓൺലൈൻ", "ഓഫ്ലൈൻ", "സ്ഥലം", "വിലാസം", "കഴിഞ്ഞ്", 
                 "എവിടെ", "കൊഴിക്കോട്", "പാലാരിവട്ടം", "മാറ്റം", 
-                "റിലൊക്കേറ്റ്", "വരുന്നു", "എവിടെ നിന്നാണ്", "ഹൈബ്രിഡ്"
+                "റിലൊക്കേറ്റ്", "വരുന്നു", "എവിടെ നിന്നാണ്", "ഹൈബ്രിഡ്","വിലാസം "
             ],
             "Certificate_query": [
                 "സർട്ടിഫിക്കറ്റ്", "ഡോക്യുമെന്റ്", "അനുഭവ സർട്ടിഫിക്കറ്റ്", 
@@ -795,6 +795,8 @@ def search_menu():
             break
         else:
             print("Invalid choice, please try again.")
+
+
 
 if __name__ == "__main__":
     while True:
