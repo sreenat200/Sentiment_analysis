@@ -650,7 +650,7 @@ def main():
         model_size = st.selectbox(
             "Select Model Size",
             ["base", "small", "medium", "large", "large-v1", "large-v2", "large-v3"],
-            index=1  # Default to small
+            index=2  # Default to small
         )
         
         st.markdown("---")
