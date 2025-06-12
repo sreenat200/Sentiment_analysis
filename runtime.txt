@@ -1,2 +1,1 @@
-python-3.10
-run streamlit_app.py
+python-3.9
