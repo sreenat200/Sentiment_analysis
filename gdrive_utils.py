@@ -19,11 +19,6 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 
 SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE', 'service_account.json')
 
-if os.path.exists(SERVICE_ACCOUNT_FILE):
-    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
-else:
-    creds = service_account.Credentials.from_service_account_info(st.secrets["gdrive"])
-
 
 def authenticate_gdrive():
     """Authenticate with Google Drive API using service account."""
