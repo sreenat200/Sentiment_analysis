@@ -16,25 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
-
-creds = None
-
-try:
-    
-    SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE', 'service_account.json')
-
-    if SERVICE_ACCOUNT_FILE and os.path.exists(SERVICE_ACCOUNT_FILE):
-        # Load from local file
-        creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE)
-        st.info("Loaded Google credentials from file.")
-    elif "gdrive" in st.secrets:
-        # Load from Streamlit secrets
-        creds = service_account.Credentials.from_service_account_info(dict(st.secrets["gdrive"]))
-        st.info("Loaded Google credentials from Streamlit secrets.")
-    else:
-        st.warning("Google credentials not found. Upload and Drive features will be disabled.")
-except Exception as e:
-    st.error(f"Failed to load Google credentials: {str(e)}")
+SERVICE_ACCOUNT_FILE = os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE', 'service_account.json')
 
 
 
