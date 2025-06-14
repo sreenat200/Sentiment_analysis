@@ -38,17 +38,6 @@ os.makedirs(nltk_data_path, exist_ok=True)  # Ensure directory exists
 nltk.data.path.append(nltk_data_path)
 
 # Download required NLTK data with error handling
-try:
-    nltk.download('punkt', download_dir=nltk_data_path, quiet=True)
-    nltk.data.find('tokenizers/punkt')
-    print("NLTK data successfully configured")
-except Exception as e:
-    print(f"Error setting up NLTK data: {str(e)}")
-    try:
-        nltk.download('punkt', quiet=True)
-        print("Fell back to default NLTK data path")
-    except Exception as fallback_error:
-        print(f"Failed to download NLTK data: {str(fallback_error)}")
 
 # Configure Matplotlib to embed fonts in PDF output
 rcParams['pdf.fonttype'] = 42
