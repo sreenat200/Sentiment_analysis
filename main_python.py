@@ -30,10 +30,7 @@ import streamlit as st
 from googleapiclient.http import MediaFileUpload
 import zipfile
 from transformers import AutoModelForAudioClassification
-from huggingface_hub import login
 
-# Hugging Face login
-login(token="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")
 
 # Configure NLTK data path
 nltk_data_path = os.path.expanduser('~/.nltk_data')
