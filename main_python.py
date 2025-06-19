@@ -19,7 +19,6 @@ from io import BytesIO
 from transformers import pipeline
 from nltk.tokenize import sent_tokenize
 import nltk
-from gdrive_utils import upload_to_gdrive, create_gdrive_folder, update_metadata_csv, authenticate_gdrive
 from PyPDF2 import PdfMerger, PdfReader, PdfWriter
 import matplotlib.font_manager as fm
 from matplotlib import rcParams
