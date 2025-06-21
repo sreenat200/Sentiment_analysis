@@ -151,7 +151,7 @@ class MalayalamTranscriptionPipeline:
         try:
             self.emotion_classifier = pipeline(
                 "audio-classification",
-                model="m3hrdadfi/wav2vec2-xlsr-persian-speech-emotion-recognition",
+                model=
                 device=0 if self.device == "cuda" else -1  # GPU if available, else CPU
             )
             print(f"Emotion classifier loaded on {self.device}")
