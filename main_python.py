@@ -18,7 +18,6 @@ from transformers import pipeline
 from PyPDF2 import PdfMerger
 import zipfile
 import multiprocessing
-from gdrive_utils import upload_to_gdrive, create_gdrive_folder, update_metadata_csv, authenticate_gdrive
 import shutil
 import urllib.request
 
