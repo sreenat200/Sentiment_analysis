@@ -147,18 +147,6 @@ class MalayalamTranscriptionPipeline:
             print(f"Error loading WhisperModel: {str(e)}")
             raise
 
-        # Initialize emotion classifier
-        try:
-            self.emotion_classifier = pipeline(
-                "audio-classification",
-                model=
-                device=0 if self.device == "cuda" else -1  # GPU if available, else CPU
-            )
-            print(f"Emotion classifier loaded on {self.device}")
-        except Exception as e:
-            print(f"Error loading emotion classifier: {str(e)}")
-            raise
-
         # Initialize translation pipeline
         try:
             self.translator = pipeline(
@@ -218,14 +206,6 @@ class MalayalamTranscriptionPipeline:
                 os.remove(wav_path)
             raise
     
-    def analyze_emotion(self, audio_path):
-        """Analyze emotion from audio file"""
-        try:
-            result = self.emotion_classifier(audio_path)
-            return max(result, key=lambda x: x['score'])['label']
-        except Exception as e:
-            print(f"Emotion analysis failed: {e}")
-            return "unknown"
 
     def transcribe_audio(self, audio_path):
         try:
