@@ -1,6 +1,5 @@
 streamlit
 pandas
-plotly
 pydub
 faster-whisper
 deep-translator
@@ -13,4 +12,7 @@ PyPDF2
 whisper
 python-dotenv
 reportlab
+plotly
+kaleido
+
 
