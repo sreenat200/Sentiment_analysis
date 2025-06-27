@@ -11,3 +11,4 @@ requests
 transformers
 PyPDF2
 whisper
+python-dotenv
