@@ -432,19 +432,38 @@ def update_recent_dirs(new_dir):
 
 def get_emotion_emoji(emotion):
     emotion_emoji_map = {
-        "happy": "😊",
-        "sad": "😢",
-        "angry": "😠",
-        "fearful": "😨",
+        "admiration": "😍",
+        "amusement": "😂",
+        "anger": "😠",
+        "annoyance": "😒",
+        "approval": "👍",
+        "caring": "🤗",
+        "confusion": "😕",
+        "curiosity": "🧐",
+        "desire": "😍",
+        "disappointment": "😞",
+        "disapproval": "👎",
         "disgust": "🤢",
+        "embarrassment": "😳",
+        "excitement": "🤩",
+        "fear": "😨",
+        "gratitude": "🙏",
+        "grief": "😭",
+        "joy": "😊",
+        "love": "❤️",
+        "nervousness": "😬",
+        "optimism": "🌈",
+        "pride": "🏅",
+        "realization": "💡",
+        "relief": "😌",
+        "remorse": "😔",
+        "sadness": "😢",
         "surprise": "😲",
         "neutral": "😐",
-        "unknown": "❓",
-        "excited": "🤩",
-        "confused": "😕",
-        "calm": "😌"
+        "unknown": "❓"
     }
     return emotion_emoji_map.get(emotion.lower(), "❓")
+
 
 def get_interpretation(score):
     if score >= 70:
