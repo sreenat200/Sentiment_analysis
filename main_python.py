@@ -168,7 +168,7 @@ class MalayalamTranscriptionPipeline:
         self.emotion_model = None
         self.emotion_tokenizer = None
         try:
-            model_name = "bhadresh-savani/distilbert-base-uncased-emotion"
+            model_name = "j-hartmann/emotion-english-multilingual"
             self.emotion_tokenizer = AutoTokenizer.from_pretrained(model_name)
             self.emotion_model = AutoModelForSequenceClassification.from_pretrained(model_name)
             self.emotion_model.to(self.device)
