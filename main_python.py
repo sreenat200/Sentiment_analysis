@@ -23,12 +23,18 @@ from transformers import pipeline
 import logging
 logger = logging.getLogger(__name__)
 import os
-from dotenv import load_dotenv
+import streamlit as st
 from huggingface_hub import login as hf_login
 
-def load_token_from_env():
-    load_dotenv()
-    return os.getenv("HF_TOKEN", "")
+def load_token_from_secrets():
+    return st.secrets.get("HF_TOKEN", "")
+
+hf_token = load_token_from_secrets()
+if hf_token:
+    hf_login(token=hf_token)
+else:
+    st.error("Hugging Face token not found in Streamlit secrets.")
+
 
 
 indic_nlp_resource_path = os.path.expanduser('~/.indic_nlp_resources')
